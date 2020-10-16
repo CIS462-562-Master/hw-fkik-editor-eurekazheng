@@ -54,9 +54,22 @@ void BVHController::update(double time, bool updateRootXZTranslation)
 {
 	// TODO: Given the current value of time, 
 	// 1. set the local transforms at each Skeleton joint using the cached spline data in member variables mRootMotion and mMotion 
-	// 2. update the joint transforms of the full skeleton in order to compute the global transforms at each joint
+    ASkeleton *skeleton = mActor->getSkeleton();
+    // Set translation for root
+    vec3 mRootTrans = mRootMotion.getValue(time);
+    if (!updateRootXZTranslation) {
+        mRootTrans[0] = 0.f;
+        mRootTrans[2] = 0.f;
+    }
+    skeleton->getRootNode()->setLocalTranslation(mRootTrans);
+    // Set rotation for each joints
+    for (int id = 0; id < skeleton->getNumJoints(); id++) {
+        mat3 mJointsRot = mMotion[id].getCachedValue(time).ToRotation();
+        skeleton->getJointByID(id)->setLocalRotation(mJointsRot);
+    }
+    // 2. update the joint transforms of the full skeleton in order to compute the global transforms at each joint
 	// Hint: the root can both rotate and translate (i.e. has 6 DOFs) while all the other joints just rotate 
-
+    skeleton->update();
 }
 
 bool BVHController::load(const std::string& filename)
@@ -232,6 +245,7 @@ void BVHController::loadFrame(std::ifstream& inFile)
 	ASkeleton* skeleton = mActor->getSkeleton();
 	for (unsigned int i = 0; i < skeleton->getNumJoints(); i++)
     {
+
         tx = ty = tz = 0.0f;
         r1 = r2 = r3 = 0.0f;
 
