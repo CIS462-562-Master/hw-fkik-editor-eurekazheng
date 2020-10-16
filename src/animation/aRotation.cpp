@@ -286,9 +286,9 @@ mat3 mat3::FromEulerAngles(RotOrder order, const vec3& anglesRad)
 
 	case YXZ:
 		//TODO: student implementation for computing rotation matrix for YXZ order of rotation goes here
-        m = mat3::Rotation3D(axisZ, anglesRad[VY])
+        m = mat3::Rotation3D(axisY, anglesRad[VY])
             * mat3::Rotation3D(axisX, anglesRad[VX])
-            * mat3::Rotation3D(axisY, anglesRad[VZ]);
+            * mat3::Rotation3D(axisZ, anglesRad[VZ]);
 
 		break;
 	}
