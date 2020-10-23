@@ -133,7 +133,24 @@ AIKchain IKController::createIKchain(int endJointID, int desiredChainSize, ASkel
 	// add the corresponding skeleton joint pointers to the AIKChain "chain" data member starting with the end joint
 	// desiredChainSize = -1 should create an IK chain of maximum length (where the last chain joint is the joint before the root joint)
 	// also add weight values to the associated AIKChain "weights" data member which can be used in a CCD IK implemention
-	return AIKchain();
+	AIKchain IKChain;
+	std::vector<AJoint *> joints;
+	std::vector<double> weights;
+
+	if (endJointID >= 0 && endJointID < pSkeleton->getNumJoints()) {
+		AJoint *pJoint = pSkeleton->getJointByID(endJointID);
+		int count = 0;
+		for (int count = 0; 
+			 pJoint != pSkeleton->getRootNode() && (count < desiredChainSize || desiredChainSize == -1); 
+			 pJoint = pJoint->getParent(), ++count) {
+			joints.push_back(pJoint);
+			weights.push_back(.1f);
+		}
+	}
+	IKChain.setChain(joints);
+	IKChain.setWeights(weights);
+
+	return IKChain;
 }
 
 
@@ -145,9 +162,10 @@ bool IKController::IKSolver_Limb(int endJointID, const ATarget& target)
 	// copy transforms from base skeleton
 	mIKSkeleton.copyTransforms(m_pSkeleton);
 
-	if (!mvalidLimbIKchains || createLimbIKchains())
+	if (!mvalidLimbIKchains)
 	{
-		return false;
+		mvalidLimbIKchains = createLimbIKchains();
+		assert(mvalidLimbIKchains);
 	}
 
 	vec3 desiredRootPosition;
@@ -234,7 +252,63 @@ int IKController::computeLimbIK(ATarget target, AIKchain& IKchain, const vec3 mi
 	// TODO: Implement the analytic/geometric IK method assuming a three joint limb  
 	// The actual position of the end joint should match the target position within some episilon error 
 	// the variable "midJointAxis" contains the rotation axis for the middle joint
-	return true;
+	int endJointID;
+	mTarget0 = target;
+
+	if (IKchain.getSize() > 0) {
+		endJointID = IKchain.getJoint(0)->getID();
+	}
+	else {
+		endJointID = -1;
+	}
+
+	if (endJointID >= 0 && endJointID < pIKSkeleton->getNumJoints())
+	{
+		m_pEndJoint = IKchain.getJoint(0);
+		m_pMiddleJoint = IKchain.getJoint(1);
+		m_pBaseJoint = IKchain.getJoint(2);
+
+		vec3 targetPos = target.getGlobalTranslation();
+		vec3 endPos = m_pEndJoint->getGlobalTranslation();
+		vec3 basePos = m_pBaseJoint->getGlobalTranslation();
+
+		vec3 baseEnd = endPos - basePos;
+		vec3 baseTarget = targetPos - basePos;
+
+		double L1 = m_pMiddleJoint->getLocalTranslation().Length();
+		double L2 = m_pEndJoint->getLocalTranslation().Length();
+		double R = baseTarget.Length();
+
+		double cosPhi = (L1 * L1 + L2 * L2 - R * R) / (2 * L1 * L2);
+		if (cosPhi < -1.f) {
+			cosPhi = -1.f;
+		}
+		if (cosPhi > 1.f) {
+			cosPhi = 1.f;
+		}
+		double theta = M_PI - acos(cosPhi);
+
+		mat3 midRotM = midRotM.Rotation3D(midJointAxis, theta);
+		m_pMiddleJoint->setLocalRotation(midRotM);
+		m_pMiddleJoint->updateTransform();
+
+		endPos = m_pEndJoint->getGlobalTranslation();
+		baseEnd = endPos - basePos;
+
+		vec3 axis = baseEnd.Cross(baseTarget);
+		double angle = axis.Length() / (baseEnd.Length() * baseTarget.Length());
+
+		vec3 normalizedAxis = axis.Normalize();
+		vec3 localAxis = m_pBaseJoint->getGlobalRotation().Inverse() * normalizedAxis;
+
+		quat tmpQ;
+		tmpQ.FromAxisAngle(localAxis, angle);
+		mat3 newRotM = m_pBaseJoint->getLocalRotation() * tmpQ.ToRotation();
+		m_pBaseJoint->setLocalRotation(newRotM);
+		m_pBaseJoint->updateTransform();
+		return 1;
+	}
+	return 0;
 }
 
 bool IKController::IKSolver_CCD(int endJointID, const ATarget& target)
@@ -342,7 +416,49 @@ int IKController::computeCCDIK(ATarget target, AIKchain& IKchain, ASkeleton* pIK
 	// 3. compute desired change to local rotation matrix
 	// 4. set local rotation matrix to new value
 	// 5. update transforms for joint and all children
-	return true;
+	int endJointID;
+	mTarget0 = target;
+
+	if (IKchain.getSize() > 0) {
+		endJointID = IKchain.getJoint(0)->getID();
+	}
+	else {
+		endJointID = -1;
+	}
+
+	if (endJointID >= 0 && endJointID < pIKSkeleton->getNumJoints()) {
+		m_pEndJoint = IKchain.getJoint(0);
+		m_pBaseJoint = IKchain.getJoint(IKchain.getSize() - 1);
+		vec3 targetPos = mTarget0.getGlobalTranslation();
+
+		for (int i = 0; i < gIKmaxIterations; i++) {
+			for (AJoint *parent = m_pEndJoint->getParent();
+			    parent != m_pBaseJoint->getParent();
+				parent = parent->getParent()) {
+
+				vec3 endPos = m_pEndJoint->getGlobalTranslation();
+				vec3 parentPos = parent->getGlobalTranslation();
+
+				vec3 endParent = endPos - parentPos;
+				vec3 targetEnd = targetPos - endPos;
+
+				vec3 axis = endParent.Cross(targetEnd).Normalize();
+				double angle = endParent.Cross(targetEnd).Length() / 
+					(endParent * endParent + endParent * targetEnd);
+
+				vec3 localAxis = parent->getGlobalRotation().Inverse() * axis;
+				angle *= mWeight0;
+
+				quat tmpQ;
+				tmpQ.FromAxisAngle(localAxis, angle);
+				mat3 newRotM = parent->getLocalRotation() * tmpQ.ToRotation();
+				parent->setLocalRotation(newRotM);
+				parent->updateTransform();
+			}
+		}
+		return 1;
+	}
+	return 0;
 }
 
 
