@@ -139,10 +139,9 @@ AIKchain IKController::createIKchain(int endJointID, int desiredChainSize, ASkel
 
 	if (endJointID >= 0 && endJointID < pSkeleton->getNumJoints()) {
 		AJoint *pJoint = pSkeleton->getJointByID(endJointID);
-		int count = 0;
-		for (int count = 0; 
-			 pJoint != pSkeleton->getRootNode() && (count < desiredChainSize || desiredChainSize == -1); 
-			 pJoint = pJoint->getParent(), ++count) {
+		for (int count = 0;
+			pJoint != pSkeleton->getRootNode() && (desiredChainSize == -1 || count < desiredChainSize);
+			pJoint = pJoint->getParent(), ++count) {
 			joints.push_back(pJoint);
 			weights.push_back(.1f);
 		}
