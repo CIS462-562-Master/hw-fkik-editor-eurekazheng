@@ -174,5 +174,10 @@ void AActor::solveFootIK(float leftHeight, float rightHeight, bool rotateLeft, b
 		rotM.FromAxisAngle(axis, angle);
 		rightFoot->setLocalRotation(rotM);
 	}
+	// Apply a constant offset to prevent the feet from "sinking into the ground"
+	vec3 rootLocalPos = root->getLocalTranslation();
+	rootLocalPos[1] += 8.f;
+	root->setLocalTranslation(rootLocalPos);
+
 	m_pSkeleton->update();
 }
